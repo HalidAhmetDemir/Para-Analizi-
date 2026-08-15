@@ -150,12 +150,20 @@ public class ParaAnalizi {
         veriler.setProperty("papara", String.valueOf(p));
         veriler.setProperty("nakit", String.valueOf(n));
 
-        // Açık kart borcu varsa hemen kaydet
-        if (evetHayirSor("Şu an ödenmemiş kredi kartı borcun var mı?")) {
-            double borc = sayiOku("Mevcut kart borcu: ");
+        // Kesinleşmiş (önceki dönemden kalan) kart borcu
+        if (evetHayirSor("Şu an kesinleşmiş/ödenmemiş kredi kartı borcun var mı?")) {
+            double borc = sayiOku("Kesinleşmiş kart borcu: ");
             veriler.setProperty("kartBorcu", String.valueOf(borc));
         } else {
             veriler.setProperty("kartBorcu", "0");
+        }
+
+        // Henüz ekstre kesilmemiş ama kart kullandıysan beklenen borcu da gir
+        if (evetHayirSor("Ekstre henüz kesilmedi ama karttan harcama yaptın mı? (beklenen borç)")) {
+            double beklenen = sayiOku("Tahmini kart harcaman (beklenen borç): ");
+            veriler.setProperty("beklenenKartBorcu", String.valueOf(beklenen));
+        } else {
+            veriler.setProperty("beklenenKartBorcu", "0");
         }
 
         veriler.setProperty("kurulumTamamlandi", "evet");
@@ -218,17 +226,24 @@ public class ParaAnalizi {
             System.out.println("💳 Ekstre günü (" + EKSTRE_GUNU + "'ü) geçti. Ekstreni Menü 4'ten girmeyi unutma.");
         }
 
-        // Kart borcu + son ödeme uyarısı
+        // Kesinleşmiş borç + son ödeme uyarısı
         double kartBorcu = bakiyeOku("kartBorcu");
         if (kartBorcu > 0) {
             if (gun <= SON_ODEME_GUNU) {
                 long kalan = SON_ODEME_GUNU - gun;
-                System.out.printf("⚠️  Kart borcun: %.2f TL — Son ödeme gününe %d gün kaldı (ayın %d'ü).%n",
-                        kartBorcu, kalan, SON_ODEME_GUNU);
+                System.out.printf("⚠️  Kesinleşmiş kart borcun: %.2f TL — Son ödeme gününe %d gün kaldı.%n",
+                        kartBorcu, kalan);
             } else {
-                System.out.printf("🚨 ÖDEME GECİKTİ! %.2f TL kart borcun var, son ödeme günü (ayın %d'ü) geçti!%n",
-                        kartBorcu, SON_ODEME_GUNU);
+                System.out.printf("🚨 ÖDEME GECİKTİ! %.2f TL kesinleşmiş kart borcun var, son ödeme günü geçti!%n",
+                        kartBorcu);
             }
+        }
+
+        // Beklenen borç uyarısı
+        double beklenenBorc = bakiyeOku("beklenenKartBorcu");
+        if (beklenenBorc > 0) {
+            System.out.printf("🟡 Beklenen kart borcun: %.2f TL — Ekstre gelince Menü 4 → Seçenek 1 ile güncelle.%n",
+                    beklenenBorc);
         }
     }
 
@@ -299,27 +314,47 @@ public class ParaAnalizi {
     // ==================== KREDİ KARTI ====================
 
     private static void kartMenusu() {
+        double beklenen = bakiyeOku("beklenenKartBorcu");
+        double kesinlesmis = bakiyeOku("kartBorcu");
+
         System.out.println("\n--- 💳 KREDİ KARTI ---");
-        System.out.println("1 - Ekstre Gir");
-        System.out.println("2 - Ödeme Yap");
+        if (beklenen > 0)
+            System.out.printf("  Beklenen borç    : %.2f TL (ekstre kesilmedi)%n", beklenen);
+        if (kesinlesmis > 0)
+            System.out.printf("  Kesinleşmiş borç : %.2f TL%n", kesinlesmis);
+
+        System.out.println("1 - Ekstre Geldi (beklenen borcu gerçeğe çevir)");
+        System.out.println("2 - Beklenen Borç Gir / Güncelle");
+        System.out.println("3 - Ödeme Yap");
         System.out.print("Seçim: ");
         String secim = scanner.next();
 
         if ("1".equals(secim)) {
-            double tutar = sayiOku("Ekstre tutarı: ");
-            double mevcut = bakiyeOku("kartBorcu");
-            veriler.setProperty("kartBorcu", String.valueOf(mevcut + tutar));
+            // Ekstre kesildi: beklenen borç silinir, gerçek ekstre tutarı kesinleşmiş borca eklenir
+            double ekstre = sayiOku("Ekstre tutarı: ");
+            double yeniKesinlesmis = kesinlesmis + ekstre;
+            veriler.setProperty("kartBorcu", String.valueOf(yeniKesinlesmis));
+            veriler.setProperty("beklenenKartBorcu", "0");
             veriler.setProperty("ekstreGirildi_" + YearMonth.from(LocalDate.now()), "evet");
             veriKaydet();
-            islemLogla("KART_EKSTRE", tutar, "Yeni ekstre");
-            System.out.printf("✅ Ekstre kaydedildi. Toplam kart borcun: %.2f TL. Son ödeme: ayın %d'ü.%n",
-                    bakiyeOku("kartBorcu"), SON_ODEME_GUNU);
+            islemLogla("KART_EKSTRE", ekstre, "Ekstre kesinlesti, beklenen borç silindi");
+            System.out.printf("✅ Ekstre kaydedildi. Toplam kesinleşmiş borcun: %.2f TL. Son ödeme: ayın %d'ü.%n",
+                    yeniKesinlesmis, SON_ODEME_GUNU);
 
         } else if ("2".equals(secim)) {
-            double kartBorcu = bakiyeOku("kartBorcu");
-            if (kartBorcu <= 0) { System.out.println("Ödenecek borç yok."); return; }
+            // Henüz ekstre kesilmedi, tahmini tutarı gir ya da güncelle
+            if (beklenen > 0)
+                System.out.printf("Mevcut beklenen borç: %.2f TL%n", beklenen);
+            double yeniBeklenen = sayiOku("Yeni beklenen borç tutarı (üzerine ekler): ");
+            veriler.setProperty("beklenenKartBorcu", String.valueOf(beklenen + yeniBeklenen));
+            veriKaydet();
+            islemLogla("KART_BEKLENEN", yeniBeklenen, "Beklenen kart borcu guncellendi");
+            System.out.printf("✅ Beklenen borç güncellendi: %.2f TL%n", bakiyeOku("beklenenKartBorcu"));
 
-            System.out.printf("Mevcut kart borcu: %.2f TL%n", kartBorcu);
+        } else if ("3".equals(secim)) {
+            if (kesinlesmis <= 0) { System.out.println("Ödenecek kesinleşmiş borç yok."); return; }
+
+            System.out.printf("Kesinleşmiş kart borcu: %.2f TL%n", kesinlesmis);
             double tutar = sayiOku("Ödeme tutarı: ");
             String hesap = hesapSec();
 
@@ -330,10 +365,10 @@ public class ParaAnalizi {
             }
 
             veriler.setProperty(hesap, String.valueOf(mevcut - tutar));
-            veriler.setProperty("kartBorcu", String.valueOf(Math.max(0, kartBorcu - tutar)));
+            veriler.setProperty("kartBorcu", String.valueOf(Math.max(0, kesinlesmis - tutar)));
             veriKaydet();
             islemLogla("KART_ODEME", tutar, "Kart ödemesi -> " + hesap);
-            System.out.printf("✅ Ödeme kaydedildi. Kalan borç: %.2f TL%n", bakiyeOku("kartBorcu"));
+            System.out.printf("✅ Ödeme kaydedildi. Kalan kesinleşmiş borç: %.2f TL%n", bakiyeOku("kartBorcu"));
 
         } else {
             System.out.println("Geçersiz seçim.");
@@ -378,9 +413,11 @@ public class ParaAnalizi {
         double papara  = bakiyeOku("papara");
         double nakit   = bakiyeOku("nakit");
         double toplam  = ziraat + papara + nakit;
-        double kartBorcu = bakiyeOku("kartBorcu");
-        double net     = toplam - kartBorcu;
-        double donguGeliri = bakiyeOku("donguGeliri");
+        double kartBorcu      = bakiyeOku("kartBorcu");
+        double beklenenBorc   = bakiyeOku("beklenenKartBorcu");
+        double toplamYukumluluk = kartBorcu + beklenenBorc;
+        double net            = toplam - toplamYukumluluk;
+        double donguGeliri    = bakiyeOku("donguGeliri");
 
         LocalDate bugun        = LocalDate.now();
         LocalDate donguBaslangic = LocalDate.parse(veriler.getProperty("donguBaslangic"));
@@ -406,10 +443,12 @@ public class ParaAnalizi {
         System.out.printf("🏦 Ziraat  : %.2f TL%n", ziraat);
         System.out.printf("📱 Papara  : %.2f TL%n", papara);
         System.out.printf("💵 Nakit   : %.2f TL%n", nakit);
-        System.out.printf("💸 Toplam Bakiye  : %.2f TL%n", toplam);
+        System.out.printf("💸 Toplam Bakiye      : %.2f TL%n", toplam);
         if (kartBorcu > 0)
-            System.out.printf("🔴 Kart Borcu     : -%.2f TL%n", kartBorcu);
-        System.out.printf("📌 NET DURUM      : %.2f TL%n", net);
+            System.out.printf("🔴 Kesinleşmiş Borç  : -%.2f TL%n", kartBorcu);
+        if (beklenenBorc > 0)
+            System.out.printf("🟡 Beklenen Borç      : -%.2f TL (ekstre kesilmedi)%n", beklenenBorc);
+        System.out.printf("📌 NET DURUM          : %.2f TL%n", net);
         System.out.println("─────────────────────────────────────");
         System.out.printf("🎯 Günlük İdeal Bütçe : %.2f TL%n", idealGunluk);
 
