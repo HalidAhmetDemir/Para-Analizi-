@@ -24,7 +24,7 @@ public class ParaAnalizi {
             System.out.print("Seçiminiz: ");
 
             String secim = scanner.next();
-            // deneme 123
+
             switch (secim) {
                 case "1":
                     raporuYazdir();
