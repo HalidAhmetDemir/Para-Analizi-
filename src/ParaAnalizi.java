@@ -428,7 +428,15 @@ public class ParaAnalizi {
         long toplamGun = ChronoUnit.DAYS.between(donguBaslangic, donguBitis);
 
         double idealGunluk = toplamGun > 0 ? donguGeliri / toplamGun : 0;
-        // Olmasi gereken net durum: donemin basindaki gelir eksi o gune kadar harcamasi gereken miktar
+
+        // Bugünden bir sonraki maaş gününe kadar harcanabilecek günlük tutar.
+        // Mevcut net para, dönem gelirinden bağımsız olarak güvenli harcama
+        // kapasitesini gösterir. Negatifse günlük limit 0 kabul edilir.
+        double bugundenSonraHarcanabilir = Math.max(0, net);
+        double bugundenSonraGunlukLimit =
+                kalanGun > 0 ? bugundenSonraHarcanabilir / kalanGun : bugundenSonraHarcanabilir;
+
+        // Olması gereken net durum: dönemin başındaki gelir eksi o güne kadar harcanması gereken miktar
         double olmasiGereken = donguGeliri - (idealGunluk * gecenGun);
         double fark = net - olmasiGereken;
 
@@ -451,6 +459,7 @@ public class ParaAnalizi {
         System.out.printf("📌 NET DURUM          : %.2f TL%n", net);
         System.out.println("─────────────────────────────────────");
         System.out.printf("🎯 Günlük İdeal Bütçe : %.2f TL%n", idealGunluk);
+        System.out.printf("💳 Bugünden Maaşa Kadar Günlük Limit : %.2f TL%n", bugundenSonraGunlukLimit);
 
         if (gecenGun == 0) {
             System.out.println("(Döngü bugün başladı, karşılaştırma için veri yok.)");
