@@ -10,29 +10,33 @@ public class ParaAnalizi {
 
     private static final String VERI_DOSYASI = "finans_verileri.properties";
     private static final String LOG_DOSYASI = "islem_gecmisi.csv";
-    private static final DateTimeFormatter GORUNUM_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+    private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
-    private static final int MAAS_GUNU = 15;   // maaşın yattığı gün
-    private static final int BURS_GUNU = 8;    // bursun yattığı gün
-    private static final int EKSTRE_GUNU = 3;  // kredi kartı ekstresinin geldiği gün
-    private static final int SON_ODEME_GUNU = 13; // kredi kartı son ödeme günü
+    private static final int MAAS_GUNU     = 15;
+    private static final int BURS_GUNU     = 8;
+    private static final int EKSTRE_GUNU   = 3;
+    private static final int SON_ODEME_GUNU = 13;
 
     private static final Properties veriler = new Properties();
     private static final Scanner scanner = new Scanner(System.in).useLocale(Locale.of("tr", "TR"));
 
+    // ==================== MAIN ====================
+
     public static void main(String[] args) {
         veriYukle();
-        donguKontrolu();
-        hatirlatmalariKontrolEt();
+        ilkKurulumKontrol();   // hiç veri yoksa sıfırdan kurulum
+        donguKontrolu();       // yeni döngü başladıysa maaş sor
+        hatirlatmalariGoster();
 
         boolean calisiyor = true;
         while (calisiyor) {
             System.out.println("\n--- 💰 PARA ANALİZİ MENÜSÜ ---");
             System.out.println("1 - Durum Raporunu Görüntüle");
-            System.out.println("2 - Harcama Gir (son girişten bu yana)");
+            System.out.println("2 - Harcama Gir");
             System.out.println("3 - Gelir Gir (burs / diğer)");
             System.out.println("4 - Kredi Kartı İşlemleri");
-            System.out.println("5 - Çıkış");
+            System.out.println("5 - Bakiyeleri Manuel Düzelt");
+            System.out.println("6 - Çıkış");
             System.out.print("Seçiminiz: ");
 
             String secim = scanner.next();
@@ -41,11 +45,12 @@ public class ParaAnalizi {
                 case "2" -> harcamaGir();
                 case "3" -> gelirGir();
                 case "4" -> kartMenusu();
-                case "5" -> {
+                case "5" -> bakiyeleriManuelDuzelt();
+                case "6" -> {
                     calisiyor = false;
                     System.out.println("Veriler kaydedildi. İyi günler!");
                 }
-                default -> System.out.println("Geçersiz seçim, lütfen tekrar deneyin.");
+                default -> System.out.println("Geçersiz seçim.");
             }
         }
     }
@@ -56,7 +61,7 @@ public class ParaAnalizi {
         try (FileInputStream fis = new FileInputStream(VERI_DOSYASI)) {
             veriler.load(fis);
         } catch (FileNotFoundException e) {
-            // ilk çalıştırma, sorun değil
+            // ilk çalıştırma
         } catch (IOException e) {
             System.out.println("Veri yüklenirken hata oluştu!");
         }
@@ -70,100 +75,159 @@ public class ParaAnalizi {
         }
     }
 
-    // Her gelir/gider/borç hareketini tarihiyle birlikte ayrı bir CSV dosyasına kaydeder.
-    // Bu, ileride "geçmişe bakma" veya grafik çizme gibi işler istenirse hazır veri sağlar.
     private static void islemLogla(String tur, double tutar, String aciklama) {
         boolean yeniDosya = !Files.exists(Paths.get(LOG_DOSYASI));
         try (FileWriter fw = new FileWriter(LOG_DOSYASI, true);
              PrintWriter pw = new PrintWriter(fw)) {
-            if (yeniDosya) {
-                pw.println("tarih,tur,tutar,aciklama");
-            }
+            if (yeniDosya) pw.println("tarih,tur,tutar,aciklama");
             pw.printf("%s,%s,%.2f,%s%n", LocalDate.now(), tur, tutar, aciklama);
         } catch (IOException e) {
-            System.out.println("İşlem geçmişe kaydedilirken hata oluştu.");
+            System.out.println("İşlem geçmişe kaydedilemedi.");
         }
     }
 
-    // ==================== GÜVENLİ GİRİŞ YARDIMCILARI ====================
+    // ==================== GİRİŞ YARDIMCILARI ====================
 
     private static double sayiOku(String mesaj) {
         while (true) {
             System.out.print(mesaj);
             try {
-                double deger = scanner.nextDouble();
-                return deger;
+                double d = scanner.nextDouble();
+                if (d < 0) { System.out.println("❌ Negatif değer girilemez."); continue; }
+                return d;
             } catch (InputMismatchException e) {
-                System.out.println("❌ Geçersiz değer. Örnek: 1500,50");
-                scanner.nextLine(); // hatalı girdiyi temizle
+                System.out.println("❌ Geçersiz değer. Virgüllü sayı için örnek: 1500,50");
+                scanner.nextLine();
             }
         }
     }
 
-    private static double bakiyeOku(String hesapAdi) {
-        return Double.parseDouble(veriler.getProperty(hesapAdi, "0"));
+    private static double bakiyeOku(String key) {
+        try { return Double.parseDouble(veriler.getProperty(key, "0")); }
+        catch (NumberFormatException e) { return 0; }
     }
 
     private static String hesapSec() {
-        System.out.println("Hangi hesap? 1-Ziraat  2-Papara  3-Nakit");
+        double z = bakiyeOku("ziraat"), p = bakiyeOku("papara"), n = bakiyeOku("nakit");
+        System.out.printf("Hangi hesap?  1-Ziraat (%.2f TL)  2-Papara (%.2f TL)  3-Nakit (%.2f TL)%n", z, p, n);
         while (true) {
             System.out.print("Seçim: ");
-            String s = scanner.next();
-            switch (s) {
+            switch (scanner.next()) {
                 case "1": return "ziraat";
                 case "2": return "papara";
                 case "3": return "nakit";
-                default: System.out.println("Geçersiz seçim, tekrar deneyin.");
+                default: System.out.println("Geçersiz seçim.");
             }
         }
     }
 
-    // ==================== DÖNGÜ VE HATIRLATMALAR ====================
+    private static boolean evetHayirSor(String soru) {
+        while (true) {
+            System.out.print(soru + " (e/h): ");
+            String cevap = scanner.next().toLowerCase(Locale.of("tr", "TR"));
+            if (cevap.equals("e")) return true;
+            if (cevap.equals("h")) return false;
+            System.out.println("Lütfen 'e' veya 'h' girin.");
+        }
+    }
+
+    // ==================== İLK KURULUM ====================
+
+    // Program hiç çalıştırılmamışsa mevcut bakiyeleri ve açık borcu sorar.
+    // Bu sayede sisteme geçişte eldeki gerçek para doğru yansır.
+    private static void ilkKurulumKontrol() {
+        if (veriler.containsKey("kurulumTamamlandi")) return;
+
+        System.out.println("\n╔══════════════════════════════════╗");
+        System.out.println("║  PARA ANALİZİ - İLK KURULUM     ║");
+        System.out.println("╚══════════════════════════════════╝");
+        System.out.println("Program ilk kez çalıştırılıyor. Mevcut bakiyelerini girelim.\n");
+
+        double z = sayiOku("Ziraat bakiyeniz: ");
+        double p = sayiOku("Papara bakiyeniz: ");
+        double n = sayiOku("Nakit paranız: ");
+        veriler.setProperty("ziraat", String.valueOf(z));
+        veriler.setProperty("papara", String.valueOf(p));
+        veriler.setProperty("nakit", String.valueOf(n));
+
+        // Açık kart borcu varsa hemen kaydet
+        if (evetHayirSor("Şu an ödenmemiş kredi kartı borcun var mı?")) {
+            double borc = sayiOku("Mevcut kart borcu: ");
+            veriler.setProperty("kartBorcu", String.valueOf(borc));
+        } else {
+            veriler.setProperty("kartBorcu", "0");
+        }
+
+        veriler.setProperty("kurulumTamamlandi", "evet");
+        veriler.setProperty("donguGeliri", "0");
+        veriKaydet();
+        System.out.println("✅ Kurulum tamamlandı.\n");
+    }
+
+    // ==================== DÖNGÜ KONTROLÜ ====================
 
     private static LocalDate donguBaslangicHesapla(LocalDate tarih) {
-        if (tarih.getDayOfMonth() >= MAAS_GUNU) {
+        if (tarih.getDayOfMonth() >= MAAS_GUNU)
             return LocalDate.of(tarih.getYear(), tarih.getMonth(), MAAS_GUNU);
-        }
         return LocalDate.of(tarih.getYear(), tarih.getMonth(), MAAS_GUNU).minusMonths(1);
     }
 
-    // Ayın 15'ine göre yeni maaş döngüsü başladıysa döngü verilerini sıfırlar ve maaşı ister.
+    // Yeni döngü tespitinde:
+    // 1) donguGeliri sıfırlanır (dönemin geliri sıfırdan sayılır)
+    // 2) Mevcut bakiyeler sıfırlanmaz — gerçek para orada duruyor
+    // 3) Maaş sorulur, ilgili hesaba eklenir
     private static void donguKontrolu() {
         LocalDate bugun = LocalDate.now();
         LocalDate donguBaslangic = donguBaslangicHesapla(bugun);
-        String kayitliDongu = veriler.getProperty("donguBaslangic", "");
+        String kayitli = veriler.getProperty("donguBaslangic", "");
 
-        if (!kayitliDongu.equals(donguBaslangic.toString())) {
-            System.out.println("\n🔔 YENİ MAAŞ DÖNGÜSÜ BAŞLADI! (" + donguBaslangic.format(GORUNUM_FORMAT) + ")");
-            veriler.setProperty("donguBaslangic", donguBaslangic.toString());
-            veriler.setProperty("donguGeliri", "0");
-            veriKaydet();
+        if (kayitli.equals(donguBaslangic.toString())) return; // aynı dönem, bir şey yapma
 
-            double maas = sayiOku("💰 Bu ayki maaş tutarınızı girin: ");
-            gelirEkle("MAAS", maas, "Aylık maaş");
-        }
+        System.out.println("\n🔔 YENİ MAAŞ DÖNGÜSÜ BAŞLADI! (" + donguBaslangic.format(FMT) + ")");
+
+        // Önceki dönemden kalan para sorunsuzca devam eder, sadece döngü sayacı sıfırlanır
+        veriler.setProperty("donguBaslangic", donguBaslangic.toString());
+        veriler.setProperty("donguGeliri", "0");
+        veriler.setProperty("sonHarcamaTarihi", donguBaslangic.toString());
+        veriKaydet();
+
+        double maas = sayiOku("💰 Bu ayki maaş tutarını girin: ");
+        String hesap = hesapSec();
+        double mevcut = bakiyeOku(hesap);
+        veriler.setProperty(hesap, String.valueOf(mevcut + maas));
+        veriler.setProperty("donguGeliri", String.valueOf(maas));
+        veriKaydet();
+        islemLogla("GELIR_MAAS", maas, "Aylık maaş -> " + hesap);
+        System.out.println("✅ Maaş kaydedildi.");
     }
 
-    // Uygulama her açıldığında bugünün tarihine göre unutulmuş olabilecek şeyleri hatırlatır.
-    private static void hatirlatmalariKontrolEt() {
+    // ==================== HATIRLATMALAR ====================
+
+    private static void hatirlatmalariGoster() {
         LocalDate bugun = LocalDate.now();
         String buAy = YearMonth.from(bugun).toString();
+        int gun = bugun.getDayOfMonth();
 
-        if (bugun.getDayOfMonth() >= BURS_GUNU && !"evet".equals(veriler.getProperty("bursGirildi_" + buAy))) {
-            System.out.println("\n🎓 Burs günü (" + BURS_GUNU + "'i) geçti. Bu ay burs aldıysan girmeyi unutma (Menü 3).");
+        // Burs hatırlatması
+        if (gun >= BURS_GUNU && !"evet".equals(veriler.getProperty("bursGirildi_" + buAy))) {
+            System.out.println("\n🎓 Burs günü (" + BURS_GUNU + "'i) geçti. Bu ay burs aldıysan Menü 3'ten gir.");
         }
 
-        if (bugun.getDayOfMonth() >= EKSTRE_GUNU && !"evet".equals(veriler.getProperty("ekstreGirildi_" + buAy))) {
-            System.out.println("\n💳 Kart ekstre günü (" + EKSTRE_GUNU + "'ü) geçti. Ekstreni girmeyi unutma (Menü 4).");
+        // Ekstre hatırlatması
+        if (gun >= EKSTRE_GUNU && !"evet".equals(veriler.getProperty("ekstreGirildi_" + buAy))) {
+            System.out.println("💳 Ekstre günü (" + EKSTRE_GUNU + "'ü) geçti. Ekstreni Menü 4'ten girmeyi unutma.");
         }
 
+        // Kart borcu + son ödeme uyarısı
         double kartBorcu = bakiyeOku("kartBorcu");
         if (kartBorcu > 0) {
-            if (bugun.getDayOfMonth() <= SON_ODEME_GUNU) {
-                long kalanGun = SON_ODEME_GUNU - bugun.getDayOfMonth();
-                System.out.printf("%n⚠️ Kredi kartı borcun var: %.2f TL. Son ödeme gününe %d gün kaldı.%n", kartBorcu, kalanGun);
+            if (gun <= SON_ODEME_GUNU) {
+                long kalan = SON_ODEME_GUNU - gun;
+                System.out.printf("⚠️  Kart borcun: %.2f TL — Son ödeme gününe %d gün kaldı (ayın %d'ü).%n",
+                        kartBorcu, kalan, SON_ODEME_GUNU);
             } else {
-                System.out.printf("%n🚨 DİKKAT: Kart son ödeme günü (%d'ü) geçti ve %.2f TL ödenmemiş borcun var!%n", SON_ODEME_GUNU, kartBorcu);
+                System.out.printf("🚨 ÖDEME GECİKTİ! %.2f TL kart borcun var, son ödeme günü (ayın %d'ü) geçti!%n",
+                        kartBorcu, SON_ODEME_GUNU);
             }
         }
     }
@@ -171,147 +235,190 @@ public class ParaAnalizi {
     // ==================== GELİR ====================
 
     private static void gelirGir() {
-        System.out.println("Gelir türü: 1-Burs  2-Diğer (hediye, ek gelir vb.)");
+        System.out.println("Gelir türü:  1-Burs  2-Diğer (hediye, ek gelir vb.)");
         System.out.print("Seçim: ");
         String secim = scanner.next();
         double tutar = sayiOku("Tutar: ");
-
-        if ("1".equals(secim)) {
-            gelirEkle("BURS", tutar, "Burs");
-            veriler.setProperty("bursGirildi_" + YearMonth.from(LocalDate.now()).toString(), "evet");
-            veriKaydet();
-        } else {
-            gelirEkle("DIGER", tutar, "Diğer gelir");
-        }
-    }
-
-    private static void gelirEkle(String tur, double tutar, String aciklama) {
         String hesap = hesapSec();
+
         double mevcut = bakiyeOku(hesap);
         veriler.setProperty(hesap, String.valueOf(mevcut + tutar));
-
         double donguGeliri = bakiyeOku("donguGeliri");
         veriler.setProperty("donguGeliri", String.valueOf(donguGeliri + tutar));
 
+        if ("1".equals(secim)) {
+            veriler.setProperty("bursGirildi_" + YearMonth.from(LocalDate.now()), "evet");
+            islemLogla("GELIR_BURS", tutar, "Burs -> " + hesap);
+        } else {
+            islemLogla("GELIR_DIGER", tutar, "Diğer gelir -> " + hesap);
+        }
+
         veriKaydet();
-        islemLogla("GELIR_" + tur, tutar, aciklama + " -> " + hesap);
         System.out.println("✅ Gelir kaydedildi.");
     }
 
     // ==================== HARCAMA ====================
 
-    // Kullanıcı her gün girmek zorunda değil: en son ne zaman harcama girdiyse
-    // (veya döngü başlangıcından beri) o tarihten bugüne kadar TOPLAM ne harcandığını sorar.
+    // Kaç gün önce son giriş yapıldığını gösterir, o aralığın toplam harcamasını sorar.
+    // Birden fazla hesaptan para çıkmışsa her hesabı ayrı ayrı gir diye sorar.
     private static void harcamaGir() {
         LocalDate bugun = LocalDate.now();
-        String sonTarihStr = veriler.getProperty("sonHarcamaTarihi", veriler.getProperty("donguBaslangic", bugun.toString()));
+        String sonTarihStr = veriler.getProperty("sonHarcamaTarihi",
+                veriler.getProperty("donguBaslangic", bugun.toString()));
         LocalDate sonTarih = LocalDate.parse(sonTarihStr);
         long gunSayisi = ChronoUnit.DAYS.between(sonTarih, bugun);
 
-        System.out.println("Son giriş: " + sonTarih.format(GORUNUM_FORMAT) + " (" + gunSayisi + " gün önce)");
-        double tutar = sayiOku("Bu aralıkta toplam ne kadar harcadın? ");
-        String hesap = hesapSec();
+        System.out.println("Son harcama girişi: " + sonTarih.format(FMT) + " (" + gunSayisi + " gün önce)");
 
-        double mevcut = bakiyeOku(hesap);
-        veriler.setProperty(hesap, String.valueOf(mevcut - tutar));
+        boolean devam = true;
+        while (devam) {
+            double tutar = sayiOku("Harcama tutarı (hangi hesaptan çıktıysa onu seçeceğiz): ");
+            String hesap = hesapSec();
+
+            double mevcut = bakiyeOku(hesap);
+            if (tutar > mevcut) {
+                System.out.printf("⚠️  %s bakiyeniz %.2f TL. Bu hesaptan bu kadar çıkış yapılırsa bakiye eksi olur.%n",
+                        hesap, mevcut);
+                if (!evetHayirSor("Yine de devam etmek istiyor musun?")) {
+                    System.out.println("İptal edildi.");
+                    return;
+                }
+            }
+
+            veriler.setProperty(hesap, String.valueOf(mevcut - tutar));
+            islemLogla("HARCAMA", tutar, gunSayisi + " gunluk harcama -> " + hesap);
+            System.out.println("✅ Kaydedildi.");
+
+            devam = evetHayirSor("Bu aralıkta başka bir hesaptan da harcama var mı?");
+        }
+
         veriler.setProperty("sonHarcamaTarihi", bugun.toString());
         veriKaydet();
-
-        islemLogla("HARCAMA", tutar, gunSayisi + " gunluk harcama -> " + hesap);
-        System.out.println("✅ Harcama kaydedildi.");
     }
 
     // ==================== KREDİ KARTI ====================
 
     private static void kartMenusu() {
         System.out.println("\n--- 💳 KREDİ KARTI ---");
-        System.out.println("1 - Ekstre Gir (yeni borç)");
+        System.out.println("1 - Ekstre Gir");
         System.out.println("2 - Ödeme Yap");
         System.out.print("Seçim: ");
         String secim = scanner.next();
 
         if ("1".equals(secim)) {
             double tutar = sayiOku("Ekstre tutarı: ");
-            double kartBorcu = bakiyeOku("kartBorcu");
-            veriler.setProperty("kartBorcu", String.valueOf(kartBorcu + tutar));
-            veriler.setProperty("ekstreGirildi_" + YearMonth.from(LocalDate.now()).toString(), "evet");
+            double mevcut = bakiyeOku("kartBorcu");
+            veriler.setProperty("kartBorcu", String.valueOf(mevcut + tutar));
+            veriler.setProperty("ekstreGirildi_" + YearMonth.from(LocalDate.now()), "evet");
             veriKaydet();
             islemLogla("KART_EKSTRE", tutar, "Yeni ekstre");
-            System.out.println("✅ Ekstre kaydedildi. Son ödeme günü: ayın " + SON_ODEME_GUNU + "'ü.");
+            System.out.printf("✅ Ekstre kaydedildi. Toplam kart borcun: %.2f TL. Son ödeme: ayın %d'ü.%n",
+                    bakiyeOku("kartBorcu"), SON_ODEME_GUNU);
+
         } else if ("2".equals(secim)) {
             double kartBorcu = bakiyeOku("kartBorcu");
-            if (kartBorcu <= 0) {
-                System.out.println("Ödenecek borç yok.");
-                return;
-            }
-            System.out.printf("Mevcut borç: %.2f TL%n", kartBorcu);
+            if (kartBorcu <= 0) { System.out.println("Ödenecek borç yok."); return; }
+
+            System.out.printf("Mevcut kart borcu: %.2f TL%n", kartBorcu);
             double tutar = sayiOku("Ödeme tutarı: ");
             String hesap = hesapSec();
 
             double mevcut = bakiyeOku(hesap);
+            if (tutar > mevcut) {
+                System.out.printf("⚠️  %s bakiyeniz %.2f TL, ödeme tutarından az.%n", hesap, mevcut);
+                if (!evetHayirSor("Yine de devam?")) { System.out.println("İptal."); return; }
+            }
+
             veriler.setProperty(hesap, String.valueOf(mevcut - tutar));
             veriler.setProperty("kartBorcu", String.valueOf(Math.max(0, kartBorcu - tutar)));
             veriKaydet();
             islemLogla("KART_ODEME", tutar, "Kart ödemesi -> " + hesap);
-            System.out.println("✅ Ödeme kaydedildi.");
+            System.out.printf("✅ Ödeme kaydedildi. Kalan borç: %.2f TL%n", bakiyeOku("kartBorcu"));
+
         } else {
             System.out.println("Geçersiz seçim.");
         }
+    }
+
+    // ==================== MANUEL DÜZELTME ====================
+
+    // Bankadan farklı bir tutar görüyorsan gerçek bakiyeyi buradan düzelt.
+    // Fark log'a "DUZELTME" olarak işlenir.
+    private static void bakiyeleriManuelDuzelt() {
+        System.out.println("\n⚙️  BAKİYE MANUEL DÜZELTME");
+        System.out.println("Gerçek bakiyeni gir. Sistemdeki değerle fark log'a kaydedilir.");
+
+        String[] hesaplar = {"ziraat", "papara", "nakit"};
+        String[] isimler  = {"Ziraat", "Papara", "Nakit"};
+
+        for (int i = 0; i < hesaplar.length; i++) {
+            double eski = bakiyeOku(hesaplar[i]);
+            System.out.printf("%s (mevcut: %.2f TL) — değiştirmek istiyor musun?%n", isimler[i], eski);
+            if (evetHayirSor("")) {
+                double yeni = sayiOku("Gerçek bakiye: ");
+                double fark = yeni - eski;
+                veriler.setProperty(hesaplar[i], String.valueOf(yeni));
+                islemLogla("DUZELTME_" + hesaplar[i].toUpperCase(), fark,
+                        String.format("%.2f -> %.2f", eski, yeni));
+                System.out.println("✅ Güncellendi.");
+            }
+        }
+        veriKaydet();
     }
 
     // ==================== RAPOR ====================
 
     private static void raporuYazdir() {
         if (!veriler.containsKey("donguBaslangic")) {
-            System.out.println("Henüz veri yok.");
+            System.out.println("Henüz döngü verisi yok.");
             return;
         }
 
-        double ziraat = bakiyeOku("ziraat");
-        double papara = bakiyeOku("papara");
-        double nakit = bakiyeOku("nakit");
-        double toplamBakiye = ziraat + papara + nakit;
-
+        double ziraat  = bakiyeOku("ziraat");
+        double papara  = bakiyeOku("papara");
+        double nakit   = bakiyeOku("nakit");
+        double toplam  = ziraat + papara + nakit;
         double kartBorcu = bakiyeOku("kartBorcu");
-        double netDurum = toplamBakiye - kartBorcu;
-
+        double net     = toplam - kartBorcu;
         double donguGeliri = bakiyeOku("donguGeliri");
 
-        LocalDate bugun = LocalDate.now();
+        LocalDate bugun        = LocalDate.now();
         LocalDate donguBaslangic = LocalDate.parse(veriler.getProperty("donguBaslangic"));
-        LocalDate donguBitis = donguBaslangic.plusMonths(1);
+        LocalDate donguBitis   = donguBaslangic.plusMonths(1);
 
-        long gecenGun = ChronoUnit.DAYS.between(donguBaslangic, bugun);
-        long kalanGun = ChronoUnit.DAYS.between(bugun, donguBitis);
-        long toplamDonguGunu = ChronoUnit.DAYS.between(donguBaslangic, donguBitis);
+        long gecenGun  = ChronoUnit.DAYS.between(donguBaslangic, bugun);
+        long kalanGun  = ChronoUnit.DAYS.between(bugun, donguBitis);
+        long toplamGun = ChronoUnit.DAYS.between(donguBaslangic, donguBitis);
 
-        double idealGunlukButce = toplamDonguGunu > 0 ? donguGeliri / toplamDonguGunu : 0;
-        double olmasiGerekenNetDurum = donguGeliri - (idealGunlukButce * gecenGun);
-        double fark = netDurum - olmasiGerekenNetDurum;
+        double idealGunluk = toplamGun > 0 ? donguGeliri / toplamGun : 0;
+        // Olmasi gereken net durum: donemin basindaki gelir eksi o gune kadar harcamasi gereken miktar
+        double olmasiGereken = donguGeliri - (idealGunluk * gecenGun);
+        double fark = net - olmasiGereken;
 
-        System.out.println("\n📊 --- ANALİZ RAPORU ---");
-        System.out.println("📅 Tarih : " + bugun.format(GORUNUM_FORMAT));
-        System.out.println("🔄 Dönem : " + donguBaslangic.format(GORUNUM_FORMAT) + " - " + donguBitis.format(GORUNUM_FORMAT));
-        System.out.println("-------------------------------------");
-        System.out.println("⏳ Geçen Süre  : " + gecenGun + " gün");
-        System.out.println("🔮 Kalan Süre  : " + kalanGun + " gün");
-        System.out.println("-------------------------------------");
+        System.out.println("\n📊 ─── ANALİZ RAPORU ───");
+        System.out.println("📅 Tarih : " + bugun.format(FMT));
+        System.out.println("🔄 Dönem : " + donguBaslangic.format(FMT) + " → " + donguBitis.format(FMT));
+        System.out.println("─────────────────────────────────────");
+        System.out.println("⏳ Geçen  : " + gecenGun + " gün   |   🔮 Kalan : " + kalanGun + " gün");
+        System.out.println("─────────────────────────────────────");
         System.out.printf("💰 Bu dönem toplam gelir : %.2f TL%n", donguGeliri);
-        System.out.printf("💳 Ziraat  : %.2f TL%n", ziraat);
-        System.out.printf("💳 Papara  : %.2f TL%n", papara);
+        System.out.println("─────────────────────────────────────");
+        System.out.printf("🏦 Ziraat  : %.2f TL%n", ziraat);
+        System.out.printf("📱 Papara  : %.2f TL%n", papara);
         System.out.printf("💵 Nakit   : %.2f TL%n", nakit);
-        System.out.printf("💸 Toplam Bakiye : %.2f TL%n", toplamBakiye);
-        if (kartBorcu > 0) {
-            System.out.printf("🔴 Ödenmemiş Kart Borcu : -%.2f TL%n", kartBorcu);
-        }
-        System.out.printf("📌 NET DURUM (borç dahil) : %.2f TL%n", netDurum);
-        System.out.println("-------------------------------------");
-        System.out.printf("🎯 Günlük İdeal Bütçe : %.2f TL%n", idealGunlukButce);
+        System.out.printf("💸 Toplam Bakiye  : %.2f TL%n", toplam);
+        if (kartBorcu > 0)
+            System.out.printf("🔴 Kart Borcu     : -%.2f TL%n", kartBorcu);
+        System.out.printf("📌 NET DURUM      : %.2f TL%n", net);
+        System.out.println("─────────────────────────────────────");
+        System.out.printf("🎯 Günlük İdeal Bütçe : %.2f TL%n", idealGunluk);
 
-        if (fark >= 0) {
-            System.out.printf("✅ DURUM İYİ: İdeal planın %.2f TL önündesin.%n", fark);
+        if (gecenGun == 0) {
+            System.out.println("(Döngü bugün başladı, karşılaştırma için veri yok.)");
+        } else if (fark >= 0) {
+            System.out.printf("✅ İdeal planın %.2f TL önündesin.%n", fark);
         } else {
-            System.out.printf("⚠️ DİKKAT: İdeal planın %.2f TL gerisindesin.%n", Math.abs(fark));
+            System.out.printf("⚠️  İdeal planın %.2f TL gerisindesin — harcamaları kıs.%n", Math.abs(fark));
         }
     }
 }
